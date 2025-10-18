@@ -6,3 +6,5 @@
 crash.log
 *.tfvars
 *.tfvars.json
+*.zip
+awscliv2.zip
