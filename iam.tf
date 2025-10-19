@@ -144,34 +144,6 @@ resource "aws_iam_user_policy_attachment" "attach_api_gateway" {
   policy_arn = aws_iam_policy.terraform_user_api_gateway.arn
 }
 
-resource "aws_dynamodb_table" "chat_history" {
-  name         = "chat-history"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "user_id"        
-  range_key    = "timestamp"     
-
-  attribute {
-    name = "user_id"
-    type = "S"
-  }
-  attribute {
-    name = "timestamp"
-    type = "S"
-  }
-
-  # Add Global Secondary Index for efficient querying
-  global_secondary_index {
-    name            = "UserTimestampIndex"
-    hash_key        = "user_id"
-    range_key       = "timestamp"
-    projection_type = "ALL"
-  }
-
-  tags = {
-    Name        = "chat-history"
-    Environment = "dev"
-  }
-}
 
 # resource "aws_lambda_function" "chatbot" {
 #   function_name = "chatbot-lambda"

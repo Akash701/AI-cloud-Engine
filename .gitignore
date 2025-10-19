@@ -2,9 +2,38 @@
 **/.terraform/*
 *.tfstate
 *.tfstate.*
-.terraform.lock.hcl
+*.tfplan
 crash.log
 *.tfvars
-*.tfvars.json
+.terraform.lock.hcl
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.env
+
+# Lambda and deployment
 *.zip
-awscliv2.zip
+lambda.zip
+deploy/
+
+# AWS and credentials
+.aws/
+secrets/
+
+# OS and IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log

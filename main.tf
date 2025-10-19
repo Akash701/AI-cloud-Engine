@@ -30,6 +30,13 @@ attribute {
     type = "S"
   }
 
+  global_secondary_index {
+    name            = "UserTimestampIndex"
+    hash_key        = "user_id"
+    range_key       = "timestamp"
+    projection_type = "ALL"
+  }
+
   tags = {
     Name        = "chat-history"
     Environment = "dev"
