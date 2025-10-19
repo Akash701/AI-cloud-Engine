@@ -6,6 +6,7 @@
 crash.log
 *.tfvars
 .terraform.lock.hcl
+terraform.tfvars
 
 # Python
 __pycache__/
@@ -37,4 +38,3 @@ Thumbs.db
 
 # Logs
 *.log
-terraform.tfvars
