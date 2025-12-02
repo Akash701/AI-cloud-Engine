@@ -1,0 +1,1 @@
+{"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": "{\"message\": \"CostBot API is running. Use Slack /costbot command for cost analysis.\", \"timestamp\": \"2025-11-15T03:37:41.159979+00:00\"}"}
