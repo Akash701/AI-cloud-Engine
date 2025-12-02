@@ -10,18 +10,20 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal
 from boto3.dynamodb.conditions import Key
 
-# Initialize Clients
+# -------- Initialize Clients -------- #
 ce_client = boto3.client('ce')
 ssm = boto3.client('ssm')
 lambda_client = boto3.client('lambda')
 dynamodb = boto3.resource('dynamodb')
 
-# Table Name (Matches Terraform)
+# Configuration
 TABLE_NAME = "chat-history"
 table = dynamodb.Table(TABLE_NAME)
 
-# -------- Secret Fetcher -------- #
+# -------- Secret Management -------- #
+
 def get_secret(parameter_name):
+    """Fetch secure parameter from SSM"""
     if not parameter_name: return None
     try:
         response = ssm.get_parameter(Name=parameter_name, WithDecryption=True)
@@ -30,15 +32,77 @@ def get_secret(parameter_name):
         print(f"❌ Secret Error: {e}")
         return None
 
+# Load Secrets from SSM (Paths provided by Terraform)
 SLACK_SIGNING_SECRET = get_secret(os.getenv('SLACK_SECRET_PATH'))
 DEEPSEEK_API_KEY = get_secret(os.getenv('DEEPSEEK_API_KEY_PATH'))
+
+# -------- Knowledge Base (Terraform Templates) -------- #
+
+def get_terraform_hints(cost_summary):
+    """Returns relevant Terraform snippets based on the cost driver."""
+    if not cost_summary:
+        return ""
+    
+    # Sort services by cost
+    expensive_service = max(cost_summary, key=cost_summary.get)
+    print(f"🔍 DEBUG: Cost driver identified as: '{expensive_service}'")
+    
+    # Keyword-based matching (More robust than exact match)
+    hints = {
+        "Compute": """
+        # TIP: Use Spot Instances for non-critical workloads to save money.
+        resource "aws_launch_template" "example" {
+          instance_market_options {
+            market_type = "spot"
+          }
+        }
+        """,
+        
+        "Storage": """
+        # TIP: Use Lifecycle Rules to move old S3 data to Glacier.
+        resource "aws_s3_bucket_lifecycle_configuration" "bucket-config" {
+          rule {
+            id = "archive"
+            status = "Enabled"
+            transition {
+              days = 30
+              storage_class = "STANDARD_IA"
+            }
+          }
+        }
+        """,
+        
+        "VPC": """
+        # TIP: NAT Gateways are expensive (~$32/mo). If this is a dev env, delete it.
+        # To remove in Terraform, comment out or delete the resource:
+        # resource "aws_nat_gateway" "example" { 
+        #   allocation_id = aws_eip.nat.id
+        #   subnet_id     = aws_subnet.public.id
+        # }
+        """,
+        
+        "Database": """
+        # TIP: Enable auto-pause for Aurora Serverless to stop charges when idle.
+        resource "aws_db_instance" "default" {
+          serverlessv2_scaling_configuration {
+            min_capacity = 0.5
+            max_capacity = 1.0
+          }
+        }
+        """
+    }
+    
+    # Check if any keyword matches the service name
+    for keyword, snippet in hints.items():
+        if keyword in expensive_service or expensive_service in keyword:
+            return snippet
+            
+    return "No specific Terraform template available for this service."
 
 # -------- Memory Management (DynamoDB) -------- #
 
 def save_interaction(user_id, query, response_text):
-    """Saves the Q&A pair to DynamoDB"""
     try:
-        # TTL (Time To Live) - Optional, keep chat for 3 days
         timestamp = str(int(time.time()))
         table.put_item(Item={
             'user_id': user_id,
@@ -51,16 +115,13 @@ def save_interaction(user_id, query, response_text):
         print(f"⚠️ Memory Write Error: {e}")
 
 def get_context(user_id):
-    """Fetches last 3 messages for context"""
     try:
-        # Query last 3 items (Reverse order)
         response = table.query(
             KeyConditionExpression=Key('user_id').eq(user_id),
-            ScanIndexForward=False, # Get newest first
+            ScanIndexForward=False, 
             Limit=3
         )
         history = ""
-        # Reverse back to chronological order for the AI
         for item in reversed(response.get('Items', [])):
             history += f"User: {item['query']}\nAI: {item['response']}\n"
         return history
@@ -71,7 +132,6 @@ def get_context(user_id):
 # -------- Core Logic -------- #
 
 def get_last_n_days_cost(n):
-    # (Same as before)
     try:
         end = date.today()
         start = end - timedelta(days=n)
@@ -92,15 +152,48 @@ def get_last_n_days_cost(n):
     except Exception:
         return {"Error": "Cost data unavailable"}
 
+def build_cost_prompt(cost_summary, query, days, history):
+    total = sum(cost_summary.values())
+    tf_hint = get_terraform_hints(cost_summary)
+    
+    prompt = f"""
+    Act as a Senior Cloud DevOps Engineer. 
+    Analyze the following AWS spend data.
+    
+    DATA:
+    Total: ${total:.2f}
+    Breakdown: {json.dumps(cost_summary)}
+    
+    CHAT HISTORY:
+    {history}
+    
+    USER QUERY: {query}
+    
+    CONTEXT (Reference Snippets):
+    {tf_hint}
+    
+    INSTRUCTIONS:
+    1. Identify the primary cost driver.
+    2. Suggest 1 technical optimization.
+    3. CRITICAL: YOU MUST PROVIDE A TERRAFORM CODE SNIPPET (HCL) based on the Context provided above. 
+       Even if the savings are small, show the code for demonstration purposes.
+    4. Explicitly state this is a suggestion.
+    
+    Output Format:
+    - **Analysis:** (Short summary)
+    - **Terraform Fix:** (Code block)
+    - **Safety:** (Warning)
+    """
+    return prompt
+
 def call_deepseek_api(prompt):
-    # (Same as before)
     try:
         url = "https://api.deepseek.com/v1/chat/completions"
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         body = {
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 600
+            "max_tokens": 800
         }
         response = requests.post(url, headers=headers, json=body, timeout=45)
         return response.json()["choices"][0]["message"]["content"]
@@ -113,37 +206,16 @@ def process_background_task(payload):
     days = payload['days']
     query = payload['query']
     user_name = payload['user_name']
-    user_id = payload['user_id'] # Needed for Memory
+    user_id = payload['user_id']
 
-    # 1. Get Cost Data
     costs = get_last_n_days_cost(days)
-    total = sum(costs.values())
-
-    # 2. Fetch History (Memory)
     chat_history = get_context(user_id)
-
-    # 3. Build Prompt with History
-    prompt = f"""
-    Act as a FinOps Engineer.
     
-    Current Spend: ${total:.2f}
-    Breakdown: {json.dumps(costs)}
-    
-    PREVIOUS CONVERSATION:
-    {chat_history}
-    
-    NEW USER QUERY: {query}
-    
-    Answer the new query using the cost data and context.
-    """
-    
-    # 4. Get AI Response
+    prompt = build_cost_prompt(costs, query, days, chat_history)
     ai_analysis = call_deepseek_api(prompt)
     
-    # 5. Save to Memory
     save_interaction(user_id, query, ai_analysis)
     
-    # 6. Post to Slack
     slack_message = {
         "response_type": "in_channel",
         "blocks": [
@@ -163,6 +235,8 @@ def process_background_task(payload):
 # -------- Main Handler -------- #
 
 def lambda_handler(event, context):
+    print(f"Event: {json.dumps(event)[:200]}")
+
     # CASE 1: Background Call
     if event.get('is_background_task'):
         process_background_task(event)
@@ -177,7 +251,7 @@ def lambda_handler(event, context):
         params = dict(urllib.parse.parse_qsl(body))
         user_text = params.get('text', '7')
         user_name = params.get('user_name', 'User')
-        user_id = params.get('user_id', 'unknown') # Capture User ID for memory
+        user_id = params.get('user_id', 'unknown')
         response_url = params.get('response_url')
 
         days = 7
@@ -210,7 +284,7 @@ def lambda_handler(event, context):
             "headers": {"Content-Type": "application/json"},
             "body": json.dumps({
                 "response_type": "ephemeral",
-                "text": "🧠 Checking memory & costs... (Wait ~5s)"
+                "text": "🧠 Analyzing AWS costs... (Wait ~5s)"
             })
         }
 

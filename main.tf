@@ -34,7 +34,7 @@ resource "aws_lambda_function" "chatbot" {
 resource "aws_sns_topic_subscription" "email_subscription" {
   topic_arn = aws_sns_topic.alerts.arn
   protocol  = "email"
-  endpoint  = var.email_endpoint
+  endpoint  = var.alert_email
   
 }
 resource "aws_dynamodb_table" "chat_history" {
@@ -120,7 +120,7 @@ resource "aws_ssm_parameter" "deepseek_key" {
   type        = "SecureString"
   value       = "CHANGE_ME_MANUALLY_IN_CONSOLE" # Dummy value
 
-  # CRITICAL: This tells Terraform "Don't check if the value changed"
+
   lifecycle {
     ignore_changes = [value]
   }
@@ -138,7 +138,7 @@ resource "aws_cloudwatch_metric_alarm" "high_usage_alarm" {
   evaluation_periods  = "1"
   metric_name         = "Invocations"
   namespace           = "AWS/Lambda"
-  period              = "300" # 5 minutes
+  period              = "300" 
   statistic           = "Sum"
   threshold           = "50"  # If > 50 chats in 5 mins, something is wrong
   alarm_description   = "Warning: High traffic detected. Check DeepSeek usage."

@@ -10,12 +10,12 @@ default = "us-east-1"
 
 }
 
-variable "email_endpoint" {
-  description = "The email address to subscribe to the SNS topic."
-  type        = string
-  default     = "akashjnair701@gmail.com"
+# variable "email_endpoint" {
+#   description = "The email address to subscribe to the SNS topic."
+#   type        = string
+#   default     = "akashjnair701@gmail.com"
   
-}
+# }
 
 variable "deepseek_api_key" {
   description = "DeepSeek API Key for the cost advisor"
@@ -30,7 +30,7 @@ description = "Slack Signing Secret for request verification"
 }
 
 variable "alert_email" {
-  description = "DeepSeek API Key for the cost advisor"
+  description = "Email for receiving cost alerts"
   type        = string
   sensitive   = true
 }
